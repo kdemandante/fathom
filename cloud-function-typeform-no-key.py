@@ -8,9 +8,13 @@ key =
 tfClient = Typeform(key)
 
 storage_client = storage.Client()
-bucket = storage_client.get_bucket('fathom_data_lake')
+bucket = storage_client.get_bucket() #insert bucket name
 
-def get_list():
+def upload_data(data, blobName):
+    blob = bucket.blob(blobName)
+    blob.upload_from_string(data, content_type='application/x-ndjson')
+
+def get_forms():
     """Triggered from a message on a Cloud Pub/Sub topic.
     Args:
          event (dict): Event payload.
@@ -20,20 +24,22 @@ def get_list():
     form_ids = []
     for form in forms['items']:
         form_ids += [form['id']]
+        blobName = 'typeform/forms/' + form['id'] + '.'
+        upload_data(json.dumps(tfClient.forms.get(form['id'])), blobName)
     return form_ids
 
-def upload_response(response, blobName):
-    blob = bucket.blob(blobName)
-    blob.upload_from_string(json.dumps(response), content_type='application/json')
-
-def get_responses(event, context):
-    formIds = get_list()
-
+def get_responses():
+    formIds = get_forms()
     for id in formIds:
-        responses = tfClient.responses.list(id)
-        for response in responses['items']:
-            blobName = 'typeform/' + response['submitted_at'].replace('-', '/')[:10] + '/' + response['response_id']
-            upload_response(response, blobName)
-            #tfClient.responses.delete(id, response['token'])
-            break
-        break
+        response_form = tfClient.responses.list(id)
+        response_list = response_form['items']
+        responses = [json.dumps(response) for response in response_list]
+        response_file = '\n'.join(responses)
+        blobName = 'typeform/responses/' + id + '.ndjson'
+        upload_data(response_file, blobName)
+
+def main(event, context):
+    get_responses()
+
+if __name__ == "__main__":
+    main()
